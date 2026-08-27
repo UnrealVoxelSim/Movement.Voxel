@@ -184,7 +184,7 @@ class Controller::Impl final
 
 Controller::Controller(const UnrealVoxelSim::Voxel::Solid::Api::IReader &solids,
                        const std::span<const Api::GroundedProfile> profiles)
-    : Impl_(std::make_unique<Impl>(solids, profiles))
+    : m_Impl(std::make_unique<Impl>(solids, profiles))
 {
 }
 
@@ -192,72 +192,72 @@ Controller::~Controller() = default;
 
 std::expected<void, Api::CommandError> Controller::Add(const Api::Register registration)
 {
-    Impl_->AssertOwnerThread();
+    m_Impl->AssertOwnerThread();
     if (!registration.Entity.IsValid()) return std::unexpected{Api::CommandError::InvalidEntity};
-    const auto *profile = Impl_->FindProfile(registration.Profile);
+    const auto *profile = m_Impl->FindProfile(registration.Profile);
     if (!profile) return std::unexpected{Api::CommandError::UnknownProfile};
-    const auto iterator = Impl_->FindAgent(registration.Entity);
-    if (iterator != Impl_->Agents.end() && iterator->Entity == registration.Entity)
+    const auto iterator = m_Impl->FindAgent(registration.Entity);
+    if (iterator != m_Impl->Agents.end() && iterator->Entity == registration.Entity)
         return std::unexpected{Api::CommandError::AlreadyRegistered};
-    if (Impl_->Collides(registration.Location, *profile))
+    if (m_Impl->Collides(registration.Location, *profile))
         return std::unexpected{Api::CommandError::LocationBlocked};
-    Api::State state{registration.Location, {}, registration.Profile, Impl_->HasSupport(registration.Location, *profile)};
-    Impl_->Agents.insert(iterator, Agent{registration.Entity, state});
+    Api::State state{registration.Location, {}, registration.Profile, m_Impl->HasSupport(registration.Location, *profile)};
+    m_Impl->Agents.insert(iterator, Agent{registration.Entity, state});
     return {};
 }
 
 std::expected<void, Api::CommandError> Controller::Remove(const Ecs::Api::EntityId entity)
 {
-    Impl_->AssertOwnerThread();
-    const auto iterator = Impl_->FindAgent(entity);
-    if (iterator == Impl_->Agents.end() || iterator->Entity != entity)
+    m_Impl->AssertOwnerThread();
+    const auto iterator = m_Impl->FindAgent(entity);
+    if (iterator == m_Impl->Agents.end() || iterator->Entity != entity)
         return std::unexpected{Api::CommandError::NotRegistered};
-    Impl_->Agents.erase(iterator);
+    m_Impl->Agents.erase(iterator);
     return {};
 }
 
 std::expected<void, Api::IntentError> Controller::Submit(const std::span<const Api::Intent> intents)
 {
-    Impl_->AssertOwnerThread();
+    m_Impl->AssertOwnerThread();
     std::vector<Api::Intent> ordered(intents.begin(), intents.end());
     std::ranges::sort(ordered, {}, &Api::Intent::Entity);
     for (std::size_t index = 0; index < ordered.size(); ++index)
     {
         if (index != 0 && ordered[index - 1].Entity == ordered[index].Entity)
             return std::unexpected{Api::IntentError{Api::IntentErrorType::DuplicateEntity, index}};
-        const auto agent = Impl_->FindAgent(ordered[index].Entity);
-        if (agent == Impl_->Agents.end() || agent->Entity != ordered[index].Entity)
+        const auto agent = m_Impl->FindAgent(ordered[index].Entity);
+        if (agent == m_Impl->Agents.end() || agent->Entity != ordered[index].Entity)
             return std::unexpected{Api::IntentError{Api::IntentErrorType::EntityNotRegistered, index}};
-        const auto *profile = Impl_->FindProfile(agent->State.Profile);
+        const auto *profile = m_Impl->FindProfile(agent->State.Profile);
         if (!profile || !IsWithinSpeed(ordered[index].DesiredVelocity, *profile))
             return std::unexpected{Api::IntentError{Api::IntentErrorType::InvalidVelocity, index}};
     }
-    Impl_->Intents = std::move(ordered);
+    m_Impl->Intents = std::move(ordered);
     return {};
 }
 
 std::expected<Api::State, Api::ReadError> Controller::Read(const Ecs::Api::EntityId entity) const noexcept
 {
-    Impl_->AssertOwnerThread();
-    const auto iterator = Impl_->FindAgent(entity);
-    if (iterator == Impl_->Agents.end() || iterator->Entity != entity)
+    m_Impl->AssertOwnerThread();
+    const auto iterator = m_Impl->FindAgent(entity);
+    if (iterator == m_Impl->Agents.end() || iterator->Entity != entity)
         return std::unexpected{Api::ReadError::NotRegistered};
     return iterator->State;
 }
 
 void Controller::Update(const Simulation::Api::StepContext context)
 {
-    Impl_->AssertOwnerThread();
+    m_Impl->AssertOwnerThread();
     const auto nanoseconds = context.Duration.Value().count();
     std::size_t intentIndex{};
-    for (auto &agent : Impl_->Agents)
+    for (auto &agent : m_Impl->Agents)
     {
-        const auto *profile = Impl_->FindProfile(agent.State.Profile);
+        const auto *profile = m_Impl->FindProfile(agent.State.Profile);
         assert(profile != nullptr);
         Api::Intent intent{agent.Entity};
-        while (intentIndex < Impl_->Intents.size() && Impl_->Intents[intentIndex].Entity < agent.Entity) ++intentIndex;
-        if (intentIndex < Impl_->Intents.size() && Impl_->Intents[intentIndex].Entity == agent.Entity)
-            intent = Impl_->Intents[intentIndex];
+        while (intentIndex < m_Impl->Intents.size() && m_Impl->Intents[intentIndex].Entity < agent.Entity) ++intentIndex;
+        if (intentIndex < m_Impl->Intents.size() && m_Impl->Intents[intentIndex].Entity == agent.Entity)
+            intent = m_Impl->Intents[intentIndex];
 
         agent.State.Velocity.X = intent.DesiredVelocity.X;
         agent.State.Velocity.Y = intent.DesiredVelocity.Y;
@@ -273,7 +273,7 @@ void Controller::Update(const Simulation::Api::StepContext context)
         const auto vertical = ScaleByDuration(agent.State.Velocity.Z.Raw(), nanoseconds);
         if (vertical != 0)
         {
-            const auto moved = Impl_->Sweep(agent.State.Location, *profile, 2, vertical);
+            const auto moved = m_Impl->Sweep(agent.State.Location, *profile, 2, vertical);
             if (moved != vertical)
             {
                 agent.State.Grounded = vertical < 0;
@@ -281,14 +281,14 @@ void Controller::Update(const Simulation::Api::StepContext context)
             }
         }
 
-        static_cast<void>(Impl_->Sweep(agent.State.Location, *profile, 0,
+        static_cast<void>(m_Impl->Sweep(agent.State.Location, *profile, 0,
                                        ScaleByDuration(agent.State.Velocity.X.Raw(), nanoseconds)));
-        static_cast<void>(Impl_->Sweep(agent.State.Location, *profile, 1,
+        static_cast<void>(m_Impl->Sweep(agent.State.Location, *profile, 1,
                                        ScaleByDuration(agent.State.Velocity.Y.Raw(), nanoseconds)));
-        if (agent.State.Grounded && !Impl_->HasSupport(agent.State.Location, *profile))
+        if (agent.State.Grounded && !m_Impl->HasSupport(agent.State.Location, *profile))
             agent.State.Grounded = false;
     }
-    Impl_->Intents.clear();
+    m_Impl->Intents.clear();
 }
 
 } // namespace UnrealVoxelSim::Movement::Voxel

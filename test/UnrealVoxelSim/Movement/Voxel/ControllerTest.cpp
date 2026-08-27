@@ -45,28 +45,28 @@ class Terrain final : public UnrealVoxelSim::Voxel::Solid::Api::IReader
 class ControllerTest : public ::testing::Test
 {
   protected:
-    ControllerTest() : Registry(Ecs::Api::RegistryScopeId{1}), Entity(Registry.Create()), Controller_(Terrain_, Profiles)
+    ControllerTest() : Registry(Ecs::Api::RegistryScopeId{1}), Entity(Registry.Create()), m_Controller(m_Terrain, Profiles)
     {
-        const auto added = Controller_.Add({Entity, Profiles[0].Id, Spawn()});
+        const auto added = m_Controller.Add({Entity, Profiles[0].Id, Spawn()});
         if (!added) throw std::runtime_error{"Test agent registration failed."};
     }
 
     void Tick()
     {
-        Controller_.Update({Simulation::Api::TickIndex{TickIndex++}, Simulation::Api::StandardStepDuration});
+        m_Controller.Update({Simulation::Api::TickIndex{TickIndex++}, Simulation::Api::StandardStepDuration});
     }
 
-    Terrain Terrain_;
+    Terrain m_Terrain;
     const std::array<Api::GroundedProfile, 1> Profiles{Api::GroundedProfile{Api::ProfileId{1}}};
     Ecs::EnTT::Registry Registry;
     Ecs::Api::EntityId Entity;
-    Controller Controller_;
+    Controller m_Controller;
     std::uint64_t TickIndex{};
 };
 
 TEST_F(ControllerTest, RegistersGroundedContinuousState)
 {
-    const auto state = Controller_.Read(Entity);
+    const auto state = m_Controller.Read(Entity);
 
     ASSERT_TRUE(state);
     EXPECT_TRUE(state->Grounded);
@@ -75,11 +75,11 @@ TEST_F(ControllerTest, RegistersGroundedContinuousState)
 
 TEST_F(ControllerTest, AppliesContinuousIntentForOneFixedTick)
 {
-    ASSERT_TRUE(Controller_.Submit(std::array{Api::Intent{Entity, {Api::Scalar::FromWhole(4), {}, {}}, false}}));
+    ASSERT_TRUE(m_Controller.Submit(std::array{Api::Intent{Entity, {Api::Scalar::FromWhole(4), {}, {}}, false}}));
 
     Tick();
 
-    const auto state = Controller_.Read(Entity);
+    const auto state = m_Controller.Read(Entity);
     ASSERT_TRUE(state);
     EXPECT_GT(state->Location.X, Spawn().X);
     EXPECT_LT(state->Location.X, Api::Scalar::FromWhole(1));
@@ -87,14 +87,14 @@ TEST_F(ControllerTest, AppliesContinuousIntentForOneFixedTick)
 
 TEST_F(ControllerTest, StopsAtSolidWall)
 {
-    Terrain_.Wall = true;
+    m_Terrain.Wall = true;
     for (int tick = 0; tick < 50; ++tick)
     {
-        ASSERT_TRUE(Controller_.Submit(std::array{Api::Intent{Entity, {Api::Scalar::FromWhole(4), {}, {}}, false}}));
+        ASSERT_TRUE(m_Controller.Submit(std::array{Api::Intent{Entity, {Api::Scalar::FromWhole(4), {}, {}}, false}}));
         Tick();
     }
 
-    const auto state = Controller_.Read(Entity);
+    const auto state = m_Controller.Read(Entity);
     ASSERT_TRUE(state);
     EXPECT_LE(state->Location.X.Raw(),
               Api::Scalar::FromRaw(Api::Scalar::OneRaw + Api::Scalar::OneRaw / 2 +
@@ -104,11 +104,11 @@ TEST_F(ControllerTest, StopsAtSolidWall)
 
 TEST_F(ControllerTest, JumpUsesProfileVelocityAndGravity)
 {
-    ASSERT_TRUE(Controller_.Submit(std::array{Api::Intent{Entity, {}, true}}));
+    ASSERT_TRUE(m_Controller.Submit(std::array{Api::Intent{Entity, {}, true}}));
 
     Tick();
 
-    const auto state = Controller_.Read(Entity);
+    const auto state = m_Controller.Read(Entity);
     ASSERT_TRUE(state);
     EXPECT_FALSE(state->Grounded);
     EXPECT_GT(state->Location.Z, Spawn().Z);
@@ -119,7 +119,7 @@ TEST_F(ControllerTest, RejectsTwoIntentsForOneEntity)
 {
     const std::array intents{Api::Intent{Entity, {}, false}, Api::Intent{Entity, {}, true}};
 
-    const auto result = Controller_.Submit(intents);
+    const auto result = m_Controller.Submit(intents);
 
     ASSERT_FALSE(result);
     EXPECT_EQ(result.error().Error, Api::IntentErrorType::DuplicateEntity);
