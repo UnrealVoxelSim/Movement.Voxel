@@ -61,5 +61,5 @@ void MovementTick(benchmark::State &state)
 
 BENCHMARK(MovementTick)->Arg(100)->Arg(500)->Arg(1000);
 
-} // namespace
-} // namespace UnrealVoxelSim::Movement::Voxel
+}
+}

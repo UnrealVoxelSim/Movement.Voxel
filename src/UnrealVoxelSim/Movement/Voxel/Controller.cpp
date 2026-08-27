@@ -50,7 +50,7 @@ struct Agent final
            velocity.Y.Raw() >= -maximum && velocity.Y.Raw() <= maximum;
 }
 
-} // namespace
+}
 
 class Controller::Impl final
 {
@@ -291,4 +291,4 @@ void Controller::Update(const Simulation::Api::StepContext context)
     m_Impl->Intents.clear();
 }
 
-} // namespace UnrealVoxelSim::Movement::Voxel
+}

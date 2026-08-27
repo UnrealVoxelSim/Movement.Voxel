@@ -161,5 +161,5 @@ TEST(ControllerRegressionTest, DropsIntoDiagonalOneCellOpeningWithoutEdgeVibrati
     EXPECT_TRUE(state->Grounded);
 }
 
-} // namespace
-} // namespace UnrealVoxelSim::Movement::Voxel
+}
+}

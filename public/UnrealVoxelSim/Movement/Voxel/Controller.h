@@ -36,4 +36,4 @@ class Controller final : public Api::ICommands, public Api::IIntentSink, public 
     std::unique_ptr<Impl> m_Impl;
 };
 
-} // namespace UnrealVoxelSim::Movement::Voxel
+}
