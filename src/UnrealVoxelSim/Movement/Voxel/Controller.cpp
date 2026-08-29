@@ -173,4 +173,4 @@ namespace UnrealVoxelSim::Movement::Voxel
 			                 UpdateEntity(position.Value, velocity.Value, profile, grounded, input, context);
 		                 });
 	}
-} // namespace UnrealVoxelSim::Movement::Voxel
+}
