@@ -123,9 +123,9 @@ namespace UnrealVoxelSim::Movement::Voxel
 
 	void Controller::UpdateEntity(Spatial::Api::Position& position,
 	                              Spatial::Api::LinearVelocity& velocity,
-	                              const Api::MovementProfileComponent& profileComponent,
+	                              const Api::ProfileComponent& profileComponent,
 	                              Api::GroundedComponent& grounded,
-	                              const Api::MovementInputComponent& input,
+	                              const Api::InputComponent& input,
 	                              const Simulation::Api::StepContext context) const
 	{
 		const auto* profile = FindProfile(profileComponent.Profile);
@@ -164,8 +164,8 @@ namespace UnrealVoxelSim::Movement::Voxel
 		assert(std::this_thread::get_id() == m_OwnerThread);
 		m_Access.ForEach(Query{},
 		                 [this, context](Ecs::Api::EntityId,
-		                                 const Api::MovementInputComponent& input,
-		                                 const Api::MovementProfileComponent& profile,
+		                                 const Api::InputComponent& input,
+		                                 const Api::ProfileComponent& profile,
 		                                 Spatial::Api::PositionComponent& position,
 		                                 Spatial::Api::LinearVelocityComponent& velocity,
 		                                 Api::GroundedComponent& grounded)

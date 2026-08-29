@@ -4,8 +4,8 @@
 #include "UnrealVoxelSim/Movement/Api/GroundedComponent.h"
 #include "UnrealVoxelSim/Movement/Api/GroundedProfile.h"
 #include "UnrealVoxelSim/Movement/Api/IUpdater.h"
-#include "UnrealVoxelSim/Movement/Api/MovementInputComponent.h"
-#include "UnrealVoxelSim/Movement/Api/MovementProfileComponent.h"
+#include "UnrealVoxelSim/Movement/Api/InputComponent.h"
+#include "UnrealVoxelSim/Movement/Api/ProfileComponent.h"
 #include "UnrealVoxelSim/Spatial/Api/LinearVelocityComponent.h"
 #include "UnrealVoxelSim/Spatial/Api/PositionComponent.h"
 #include "UnrealVoxelSim/Voxel/Solid/Api/IReader.h"
@@ -19,12 +19,12 @@ namespace UnrealVoxelSim::Movement::Voxel
 {
 	class Controller final : public Api::IUpdater
 	{
-		using Query = Ecs::Api::Query<Ecs::Api::Read<Api::MovementInputComponent, Api::MovementProfileComponent>,
+		using Query = Ecs::Api::Query<Ecs::Api::Read<Api::InputComponent, Api::ProfileComponent>,
 									  Ecs::Api::Write<Spatial::Api::PositionComponent,
 													  Spatial::Api::LinearVelocityComponent,
 													  Api::GroundedComponent>>;
 		using Permissions =
-			Ecs::Api::Permissions<Ecs::Api::Read<Api::MovementInputComponent, Api::MovementProfileComponent>,
+			Ecs::Api::Permissions<Ecs::Api::Read<Api::InputComponent, Api::ProfileComponent>,
 								  Ecs::Api::Write<Spatial::Api::PositionComponent,
 												  Spatial::Api::LinearVelocityComponent,
 												  Api::GroundedComponent>>;
@@ -61,9 +61,9 @@ namespace UnrealVoxelSim::Movement::Voxel
 									  const Api::GroundedProfile& profile) const noexcept;
 		void UpdateEntity(Spatial::Api::Position& position,
 						  Spatial::Api::LinearVelocity& velocity,
-						  const Api::MovementProfileComponent& profile,
+						  const Api::ProfileComponent& profile,
 						  Api::GroundedComponent& grounded,
-						  const Api::MovementInputComponent& input,
+						  const Api::InputComponent& input,
 						  Simulation::Api::StepContext context) const;
 
 		Access m_Access;
