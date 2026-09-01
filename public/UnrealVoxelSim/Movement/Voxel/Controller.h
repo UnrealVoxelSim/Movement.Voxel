@@ -3,11 +3,12 @@
 #include "UnrealVoxelSim/Ecs/Api/Access.h"
 #include "UnrealVoxelSim/Movement/Api/GroundedComponent.h"
 #include "UnrealVoxelSim/Movement/Api/GroundedProfile.h"
-#include "UnrealVoxelSim/Movement/Api/IUpdater.h"
+#include "UnrealVoxelSim/Movement/Api/IIntentReceiver.h"
 #include "UnrealVoxelSim/Movement/Api/InputComponent.h"
 #include "UnrealVoxelSim/Movement/Api/ProfileComponent.h"
 #include "UnrealVoxelSim/Spatial/Api/LinearVelocityComponent.h"
 #include "UnrealVoxelSim/Spatial/Api/PositionComponent.h"
+#include "UnrealVoxelSim/Simulation/Api/IStepParticipant.h"
 #include "UnrealVoxelSim/Voxel/Solid/Api/IReader.h"
 
 #include <cstdint>
@@ -17,17 +18,18 @@
 
 namespace UnrealVoxelSim::Movement::Voxel
 {
-	class Controller final : public Api::IUpdater
+	class Controller final : public Api::IIntentReceiver, public Simulation::Api::IStepParticipant
 	{
 		using Query = Ecs::Api::Query<Ecs::Api::Read<Api::InputComponent, Api::ProfileComponent>,
 									  Ecs::Api::Write<Spatial::Api::PositionComponent,
 													  Spatial::Api::LinearVelocityComponent,
 													  Api::GroundedComponent>>;
-		using Permissions =
-			Ecs::Api::Permissions<Ecs::Api::Read<Api::InputComponent, Api::ProfileComponent>,
-								  Ecs::Api::Write<Spatial::Api::PositionComponent,
-												  Spatial::Api::LinearVelocityComponent,
-												  Api::GroundedComponent>>;
+		using Permissions = Ecs::Api::Permissions<
+			Ecs::Api::Read<Api::ProfileComponent>,
+			Ecs::Api::Write<Spatial::Api::PositionComponent,
+			                Spatial::Api::LinearVelocityComponent,
+			                Api::GroundedComponent>,
+			Ecs::Api::Structural<Api::InputComponent>>;
 		using Raw = std::int64_t;
 
 	public:
@@ -39,18 +41,14 @@ namespace UnrealVoxelSim::Movement::Voxel
 		Controller(const Controller&) = delete;
 		Controller& operator=(const Controller&) = delete;
 
-		void Update(Simulation::Api::StepContext context) override;
+		[[nodiscard]] std::expected<void, Api::IntentError> SetIntent(
+			Ecs::Api::EntityId entity,
+			Simulation::Api::TickIndex tick,
+			Api::Intent intent) override;
+		void Step(Simulation::Api::StepContext context) override;
 
 	private:
-		static constexpr Raw One = Math::Api::FixedPointScalar::OneRaw;
-		static constexpr std::int64_t NanosecondsPerSecond = 1'000'000'000;
-
-		// TODO Private static methods can be placed in namespace{} inside Controller.cpp
-		[[nodiscard]] static Raw FloorCell(Raw value) noexcept;
-		[[nodiscard]] static Raw ScaleByDuration(Raw value, std::int64_t nanoseconds) noexcept;
-		[[nodiscard]] static bool IsWithinSpeed(Spatial::Api::LinearVelocity value,
-												const Api::GroundedProfile& profile) noexcept;
-
+		void AssertOwnerThread() const noexcept;
 		[[nodiscard]] const Api::GroundedProfile* FindProfile(Api::ProfileId id) const noexcept;
 		[[nodiscard]] bool IsBlocked(Raw x, Raw y, Raw z) const noexcept;
 		[[nodiscard]] bool Collides(Spatial::Api::Position position,

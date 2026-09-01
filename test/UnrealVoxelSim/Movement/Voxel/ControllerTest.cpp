@@ -58,21 +58,22 @@ namespace UnrealVoxelSim::Movement::Voxel
 			{
 				if (!Registry.Assign<Spatial::Api::PositionComponent>(entity, position) ||
 					!Registry.Assign<Spatial::Api::LinearVelocityComponent>(entity, Velocity{}) ||
-					!Registry.Assign<Api::MovementProfileComponent>(entity, Profiles[0].Id) ||
-					!Registry.Assign<Api::GroundedComponent>(entity, true) ||
-					!Registry.Assign<Api::MovementInputComponent>(entity, Api::MovementInputComponent{}))
+					!Registry.Assign<Api::ProfileComponent>(entity, Profiles[0].Id) ||
+					!Registry.Assign<Api::GroundedComponent>(entity, true))
 					throw std::runtime_error{"Test movement components could not be composed."};
+				if (!Movement.SetIntent(entity, {}, {}))
+					throw std::runtime_error{"Test movement intent could not be initialized."};
 			}
 
 			void SetInput(const Velocity velocity = {}, const bool jump = false)
 			{
-				ASSERT_TRUE(Registry.Assign<Api::MovementInputComponent>(
-					Entity, Api::MovementInputComponent{Simulation::Api::TickIndex{TickIndex}, velocity, jump}));
+				ASSERT_TRUE(Movement.SetIntent(
+					Entity, Simulation::Api::TickIndex{TickIndex}, Api::Intent{velocity, jump}));
 			}
 
 			void Tick()
 			{
-				Movement.Update({Simulation::Api::TickIndex{TickIndex++}, Simulation::Api::StandardStepDuration});
+				Movement.Step({Simulation::Api::TickIndex{TickIndex++}, Simulation::Api::StandardStepDuration});
 			}
 
 			[[nodiscard]] const Spatial::Api::PositionComponent& PositionState() const
@@ -103,6 +104,24 @@ namespace UnrealVoxelSim::Movement::Voxel
 		{
 			EXPECT_TRUE(GroundedState().Value);
 			EXPECT_EQ(PositionState().Value, Spawn());
+			EXPECT_TRUE(Registry.Contains<Api::InputComponent>(Entity));
+		}
+
+		TEST_F(ControllerTest, RejectsIntentForEntityWithoutMovementComposition)
+		{
+			const auto entity = Registry.Create();
+			const auto result = Movement.SetIntent(entity, {}, {});
+			ASSERT_FALSE(result);
+			EXPECT_EQ(result.error(), Api::IntentError::EntityNotMovable);
+			EXPECT_FALSE(Registry.Contains<Api::InputComponent>(entity));
+		}
+
+		TEST_F(ControllerTest, RejectsIntentOutsideConfiguredMovementProfile)
+		{
+			const Velocity excessive{Scalar::FromRaw(Profiles[0].MaximumSpeed.Raw() + 1), {}, {}};
+			const auto result = Movement.SetIntent(Entity, {}, Api::Intent{excessive, false});
+			ASSERT_FALSE(result);
+			EXPECT_EQ(result.error(), Api::IntentError::InvalidIntent);
 		}
 
 		TEST_F(ControllerTest, AppliesCurrentControllerInputForOneFixedTick)
@@ -115,9 +134,8 @@ namespace UnrealVoxelSim::Movement::Voxel
 
 		TEST_F(ControllerTest, IgnoresStaleControllerInput)
 		{
-			ASSERT_TRUE(Registry.Assign<Api::MovementInputComponent>(
-				Entity,
-				Api::MovementInputComponent{Simulation::Api::TickIndex{7}, {Scalar::FromWhole(4), {}, {}}, false}));
+			ASSERT_TRUE(Movement.SetIntent(
+				Entity, Simulation::Api::TickIndex{7}, Api::Intent{{Scalar::FromWhole(4), {}, {}}, false}));
 			Tick();
 			EXPECT_EQ(PositionState().Value.X, Spawn().X);
 		}
@@ -153,11 +171,11 @@ namespace UnrealVoxelSim::Movement::Voxel
 			const auto entity = registry.Create();
 			ASSERT_TRUE(registry.Assign<Spatial::Api::PositionComponent>(entity, Spawn(2)));
 			ASSERT_TRUE(registry.Assign<Spatial::Api::LinearVelocityComponent>(entity, Velocity{}));
-			ASSERT_TRUE(registry.Assign<Api::MovementProfileComponent>(entity, profiles[0].Id));
+			ASSERT_TRUE(registry.Assign<Api::ProfileComponent>(entity, profiles[0].Id));
 			ASSERT_TRUE(registry.Assign<Api::GroundedComponent>(entity, true));
-			ASSERT_TRUE(registry.Assign<Api::MovementInputComponent>(entity, Api::MovementInputComponent{}));
 			Controller::Access access{registry};
 			Controller controller{access, terrain, profiles};
+			ASSERT_TRUE(controller.SetIntent(entity, {}, {}));
 
 			constexpr auto target = Scalar::OneRaw + Scalar::OneRaw / 2;
 			const auto diagonal = Scalar::FromRaw(profiles[0].MaximumSpeed.Raw() * 1000 / 1414);
@@ -171,9 +189,9 @@ namespace UnrealVoxelSim::Movement::Voxel
 				const Velocity desired{Scalar::FromRaw(diagonal.Raw() * direction(target - position.X.Raw())),
 									   Scalar::FromRaw(diagonal.Raw() * direction(target - position.Y.Raw())),
 									   {}};
-				ASSERT_TRUE(registry.Assign<Api::MovementInputComponent>(
-					entity, Api::MovementInputComponent{Simulation::Api::TickIndex{tick}, desired, false}));
-				controller.Update({Simulation::Api::TickIndex{tick}, Simulation::Api::StandardStepDuration});
+				ASSERT_TRUE(controller.SetIntent(
+					entity, Simulation::Api::TickIndex{tick}, Api::Intent{desired, false}));
+				controller.Step({Simulation::Api::TickIndex{tick}, Simulation::Api::StandardStepDuration});
 			}
 			EXPECT_LT(registry.Get<Spatial::Api::PositionComponent>(entity)->get().Value.Z,
 					  Scalar::FromRaw(Scalar::OneRaw + Scalar::OneRaw / 4));

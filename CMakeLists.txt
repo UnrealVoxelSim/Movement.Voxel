@@ -41,6 +41,7 @@ FetchContent_MakeAvailable(uvsbuild)
 include("${uvsbuild_SOURCE_DIR}/UnrealVoxelSim.Build.CMake.cmake")
 UnrealVoxelSimAddInternalDependency(GITHUB_REPOSITORY UnrealVoxelSim/Ecs.Api)
 UnrealVoxelSimAddInternalDependency(GITHUB_REPOSITORY UnrealVoxelSim/Movement.Api)
+UnrealVoxelSimAddInternalDependency(GITHUB_REPOSITORY UnrealVoxelSim/Simulation.Api)
 UnrealVoxelSimAddInternalDependency(GITHUB_REPOSITORY UnrealVoxelSim/Voxel.Solid.Api)
 if((UNREALVOXELSIM_BUILD_TESTS AND BUILD_TESTING OR UNREALVOXELSIM_BUILD_BENCHMARKS) AND
    CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)

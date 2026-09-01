@@ -49,9 +49,9 @@ namespace UnrealVoxelSim::Movement::Voxel
 									 Scalar::FromWhole(1)};
 				if (!registry.Assign<Spatial::Api::PositionComponent>(entity, spawn) ||
 					!registry.Assign<Spatial::Api::LinearVelocityComponent>(entity, Velocity{}) ||
-					!registry.Assign<Api::MovementProfileComponent>(entity, profiles[0].Id) ||
+					!registry.Assign<Api::ProfileComponent>(entity, profiles[0].Id) ||
 					!registry.Assign<Api::GroundedComponent>(entity, true) ||
-					!registry.Assign<Api::MovementInputComponent>(entity, Api::MovementInputComponent{}))
+					!controller.SetIntent(entity, {}, {}))
 				{
 					state.SkipWithError("Movement component composition failed");
 					return;
@@ -65,16 +65,16 @@ namespace UnrealVoxelSim::Movement::Voxel
 				static_cast<void>(_);
 				for (const auto entity : entities)
 				{
-					if (!registry.Assign<Api::MovementInputComponent>(
+					if (!controller.SetIntent(
 							entity,
-							Api::MovementInputComponent{
-								Simulation::Api::TickIndex{tick}, {Scalar::FromWhole(4), {}, {}}, false}))
+							Simulation::Api::TickIndex{tick},
+							Api::Intent{{Scalar::FromWhole(4), {}, {}}, false}))
 					{
 						state.SkipWithError("Movement input update failed");
 						return;
 					}
 				}
-				controller.Update({Simulation::Api::TickIndex{tick}, Simulation::Api::StandardStepDuration});
+				controller.Step({Simulation::Api::TickIndex{tick}, Simulation::Api::StandardStepDuration});
 				++tick;
 				benchmark::ClobberMemory();
 			}
