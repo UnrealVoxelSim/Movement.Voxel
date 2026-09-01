@@ -30,20 +30,21 @@ namespace UnrealVoxelSim::Movement::Voxel
 		}
 
 		[[nodiscard]] bool IsWithinSpeed(const Spatial::Api::LinearVelocity value,
-		                                 const Api::GroundedProfile& profile) noexcept
+										 const Api::GroundedProfile& profile) noexcept
 		{
-			const auto maximum = profile.MaximumSpeed.Raw();
-			return value.Z.Raw() == 0 && value.X.Raw() >= -maximum && value.X.Raw() <= maximum &&
-				value.Y.Raw() >= -maximum && value.Y.Raw() <= maximum;
+			const auto horizontal = std::max(profile.MaximumSpeed.Raw(), profile.SwimmingSpeed.Raw());
+			const auto vertical = profile.SwimmingSpeed.Raw();
+			return value.Z.Raw() >= -vertical && value.Z.Raw() <= vertical && value.X.Raw() >= -horizontal &&
+				value.X.Raw() <= horizontal && value.Y.Raw() >= -horizontal && value.Y.Raw() <= horizontal;
 		}
 	}
 
 	Controller::Controller(Access access,
-	                       const UnrealVoxelSim::Voxel::Solid::Api::IReader& solids,
-	                       const std::span<const Api::GroundedProfile> profiles) :
-		m_Access(access),
-		m_Solids(solids),
-		m_Profiles(profiles.begin(), profiles.end())
+						   const UnrealVoxelSim::Voxel::Solid::Api::IReader& solids,
+						   const std::span<const Api::GroundedProfile> profiles,
+						   const std::span<const UnrealVoxelSim::Voxel::Solid::Api::MaterialTraversal> traversal) :
+		m_Access(access), m_Solids(solids), m_Profiles(profiles.begin(), profiles.end()),
+		m_Traversal(traversal.begin(), traversal.end())
 	{
 		if (m_Profiles.empty() ||
 			std::ranges::any_of(m_Profiles, [](const auto& profile) { return !profile.IsValid(); }))
@@ -55,13 +56,23 @@ namespace UnrealVoxelSim::Movement::Voxel
 		{
 			throw std::invalid_argument{"Movement profile identifiers must be unique."};
 		}
+		if (std::ranges::any_of(m_Traversal, [](const auto& value) { return !value.IsValid(); }))
+		{
+			throw std::invalid_argument{"Movement material traversal definitions must be valid."};
+		}
+		std::ranges::sort(m_Traversal, {}, &UnrealVoxelSim::Voxel::Solid::Api::MaterialTraversal::Material);
+		if (std::ranges::adjacent_find(
+				m_Traversal, {}, &UnrealVoxelSim::Voxel::Solid::Api::MaterialTraversal::Material) != m_Traversal.end())
+		{
+			throw std::invalid_argument{"Movement material traversal definitions must be unique."};
+		}
 	}
 
 	void Controller::AssertOwnerThread() const noexcept { assert(std::this_thread::get_id() == m_OwnerThread); }
 
 	std::expected<void, Api::IntentError> Controller::SetIntent(const Ecs::Api::EntityId entity,
-	                                                            const Simulation::Api::TickIndex tick,
-	                                                            const Api::Intent intent)
+																const Simulation::Api::TickIndex tick,
+																const Api::Intent intent)
 	{
 		AssertOwnerThread();
 		if (!entity.IsValid() || !m_Access.IsAlive(entity))
@@ -119,7 +130,60 @@ namespace UnrealVoxelSim::Movement::Voxel
 		}
 		const auto cell =
 			m_Solids.Read({static_cast<std::int32_t>(x), static_cast<std::int32_t>(y), static_cast<std::int32_t>(z)});
-		return !cell || !cell->IsEmpty();
+		if (!cell)
+		{
+			return true;
+		}
+		if (cell->IsEmpty())
+		{
+			return false;
+		}
+		const auto iterator = std::ranges::lower_bound(
+			m_Traversal, cell->Material(), {}, &UnrealVoxelSim::Voxel::Solid::Api::MaterialTraversal::Material);
+		return iterator == m_Traversal.end() || iterator->Material != cell->Material() || iterator->BlocksOccupancy;
+	}
+
+	bool Controller::IsSwimming(const Spatial::Api::Position position,
+								const Api::GroundedProfile& profile) const noexcept
+	{
+		if (!profile.CanSwim())
+		{
+			return false;
+		}
+		const auto halfWidth = static_cast<Raw>(profile.Width) * One / 2 - profile.CollisionSkin.Raw();
+		const auto halfLength = static_cast<Raw>(profile.Length) * One / 2 - profile.CollisionSkin.Raw();
+		const auto minimumX = FloorCell(position.X.Raw() - halfWidth);
+		const auto maximumX = FloorCell(position.X.Raw() + halfWidth - 1);
+		const auto minimumY = FloorCell(position.Y.Raw() - halfLength);
+		const auto maximumY = FloorCell(position.Y.Raw() + halfLength - 1);
+		const auto minimumZ = FloorCell(position.Z.Raw());
+		const auto maximumZ = FloorCell(position.Z.Raw() + static_cast<Raw>(profile.Height) * One - 1);
+		for (auto z = minimumZ; z <= maximumZ; ++z)
+		{
+			for (auto y = minimumY; y <= maximumY; ++y)
+			{
+				for (auto x = minimumX; x <= maximumX; ++x)
+				{
+					const auto cell = m_Solids.Read(
+						{static_cast<std::int32_t>(x), static_cast<std::int32_t>(y), static_cast<std::int32_t>(z)});
+					if (!cell || cell->IsEmpty())
+					{
+						continue;
+					}
+					const auto iterator =
+						std::ranges::lower_bound(m_Traversal,
+												 cell->Material(),
+												 {},
+												 &UnrealVoxelSim::Voxel::Solid::Api::MaterialTraversal::Material);
+					if (iterator != m_Traversal.end() && iterator->Material == cell->Material() &&
+						iterator->AllowsSwimming)
+					{
+						return true;
+					}
+				}
+			}
+		}
+		return false;
 	}
 
 	bool Controller::Collides(const Spatial::Api::Position position, const Api::GroundedProfile& profile) const noexcept
@@ -149,9 +213,9 @@ namespace UnrealVoxelSim::Movement::Voxel
 	}
 
 	Controller::Raw Controller::Sweep(Spatial::Api::Position& position,
-	                                  const Api::GroundedProfile& profile,
-	                                  const int axis,
-	                                  const Raw delta) const noexcept
+									  const Api::GroundedProfile& profile,
+									  const int axis,
+									  const Raw delta) const noexcept
 	{
 		if (delta == 0)
 		{
@@ -189,7 +253,7 @@ namespace UnrealVoxelSim::Movement::Voxel
 	}
 
 	bool Controller::HasSupport(const Spatial::Api::Position position,
-	                            const Api::GroundedProfile& profile) const noexcept
+								const Api::GroundedProfile& profile) const noexcept
 	{
 		auto probe = position;
 		probe.Z = Math::Api::FixedPointScalar::FromRaw(probe.Z.Raw() - 1);
@@ -197,17 +261,27 @@ namespace UnrealVoxelSim::Movement::Voxel
 	}
 
 	void Controller::UpdateEntity(Spatial::Api::Position& position,
-	                              Spatial::Api::LinearVelocity& velocity,
-	                              const Api::ProfileComponent& profileComponent,
-	                              Api::GroundedComponent& grounded,
-	                              const Api::InputComponent& input,
-	                              const Simulation::Api::StepContext context) const
+								  Spatial::Api::LinearVelocity& velocity,
+								  const Api::ProfileComponent& profileComponent,
+								  Api::GroundedComponent& grounded,
+								  const Api::InputComponent& input,
+								  const Simulation::Api::StepContext context) const
 	{
 		const auto* profile = FindProfile(profileComponent.Profile);
 		assert(profile != nullptr);
 		const auto desired = input.Tick == context.Tick && IsWithinSpeed(input.DesiredVelocity, *profile)
-			                     ? input.DesiredVelocity
-			                     : Spatial::Api::LinearVelocity{};
+			? input.DesiredVelocity
+			: Spatial::Api::LinearVelocity{};
+		const auto nanoseconds = context.Duration.Value().count();
+		if (IsSwimming(position, *profile))
+		{
+			grounded.Value = false;
+			velocity = desired;
+			static_cast<void>(Sweep(position, *profile, 0, ScaleByDuration(velocity.X.Raw(), nanoseconds)));
+			static_cast<void>(Sweep(position, *profile, 1, ScaleByDuration(velocity.Y.Raw(), nanoseconds)));
+			static_cast<void>(Sweep(position, *profile, 2, ScaleByDuration(velocity.Z.Raw(), nanoseconds)));
+			return;
+		}
 		velocity.X = desired.X;
 		velocity.Y = desired.Y;
 		if (input.Tick == context.Tick && input.JumpRequested && grounded.Value)
@@ -215,7 +289,6 @@ namespace UnrealVoxelSim::Movement::Voxel
 			velocity.Z = profile->JumpSpeed;
 			grounded.Value = false;
 		}
-		const auto nanoseconds = context.Duration.Value().count();
 		if (!grounded.Value)
 		{
 			velocity.Z += Math::Api::FixedPointScalar::FromRaw(ScaleByDuration(profile->Gravity.Raw(), nanoseconds));
@@ -242,14 +315,12 @@ namespace UnrealVoxelSim::Movement::Voxel
 	{
 		AssertOwnerThread();
 		m_Access.ForEach(Query{},
-		                 [this, context](Ecs::Api::EntityId,
-		                                 const Api::InputComponent& input,
-		                                 const Api::ProfileComponent& profile,
-		                                 Spatial::Api::PositionComponent& position,
-		                                 Spatial::Api::LinearVelocityComponent& velocity,
-		                                 Api::GroundedComponent& grounded)
-		                 {
-			                 UpdateEntity(position.Value, velocity.Value, profile, grounded, input, context);
-		                 });
+						 [this, context](Ecs::Api::EntityId,
+										 const Api::InputComponent& input,
+										 const Api::ProfileComponent& profile,
+										 Spatial::Api::PositionComponent& position,
+										 Spatial::Api::LinearVelocityComponent& velocity,
+										 Api::GroundedComponent& grounded)
+						 { UpdateEntity(position.Value, velocity.Value, profile, grounded, input, context); });
 	}
 }

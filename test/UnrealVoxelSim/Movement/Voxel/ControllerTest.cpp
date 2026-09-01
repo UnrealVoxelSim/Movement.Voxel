@@ -4,6 +4,7 @@
 #include "UnrealVoxelSim/Ecs/EnTT/Registry.h"
 #include "UnrealVoxelSim/Voxel/Solid/Api/Cell.h"
 #include "UnrealVoxelSim/Voxel/Solid/Api/MaterialId.h"
+#include "UnrealVoxelSim/Voxel/Solid/Api/MaterialTraversal.h"
 
 #include <gtest/gtest.h>
 
@@ -30,6 +31,11 @@ namespace UnrealVoxelSim::Movement::Voxel
 				const bool cornerLedge = CornerLedge && position.Z == 1 &&
 					((position.X == 0 && position.Y == 0) || (position.X == 1 && position.Y == 0) ||
 					 (position.X == 0 && position.Y == 1));
+				const bool water = Water && position.X == 0 && position.Y == 0 && position.Z >= 1 && position.Z <= 4;
+				if (water)
+				{
+					return UnrealVoxelSim::Voxel::Solid::Api::Cell{UnrealVoxelSim::Voxel::Solid::Api::MaterialId{2}};
+				}
 				return ground || wall || cornerLedge
 					? UnrealVoxelSim::Voxel::Solid::Api::Cell{UnrealVoxelSim::Voxel::Solid::Api::MaterialId{1}}
 					: UnrealVoxelSim::Voxel::Solid::Api::Cell{};
@@ -37,6 +43,7 @@ namespace UnrealVoxelSim::Movement::Voxel
 
 			bool Wall{};
 			bool CornerLedge{};
+			bool Water{};
 		};
 
 		[[nodiscard]] constexpr Position Spawn(const int z = 1)
@@ -67,8 +74,8 @@ namespace UnrealVoxelSim::Movement::Voxel
 
 			void SetInput(const Velocity velocity = {}, const bool jump = false)
 			{
-				ASSERT_TRUE(Movement.SetIntent(
-					Entity, Simulation::Api::TickIndex{TickIndex}, Api::Intent{velocity, jump}));
+				ASSERT_TRUE(
+					Movement.SetIntent(Entity, Simulation::Api::TickIndex{TickIndex}, Api::Intent{velocity, jump}));
 			}
 
 			void Tick()
@@ -189,13 +196,41 @@ namespace UnrealVoxelSim::Movement::Voxel
 				const Velocity desired{Scalar::FromRaw(diagonal.Raw() * direction(target - position.X.Raw())),
 									   Scalar::FromRaw(diagonal.Raw() * direction(target - position.Y.Raw())),
 									   {}};
-				ASSERT_TRUE(controller.SetIntent(
-					entity, Simulation::Api::TickIndex{tick}, Api::Intent{desired, false}));
+				ASSERT_TRUE(
+					controller.SetIntent(entity, Simulation::Api::TickIndex{tick}, Api::Intent{desired, false}));
 				controller.Step({Simulation::Api::TickIndex{tick}, Simulation::Api::StandardStepDuration});
 			}
 			EXPECT_LT(registry.Get<Spatial::Api::PositionComponent>(entity)->get().Value.Z,
 					  Scalar::FromRaw(Scalar::OneRaw + Scalar::OneRaw / 4));
 			EXPECT_TRUE(registry.Get<Api::GroundedComponent>(entity)->get().Value);
+		}
+
+		TEST(SwimmingControllerTest, SwimsVerticallyThroughSwimmableMaterial)
+		{
+			Terrain terrain;
+			terrain.Water = true;
+			auto profile = Api::GroundedProfile{Api::ProfileId{1}};
+			profile.SwimmingSpeed = Scalar::FromWhole(2);
+			const std::array profiles{profile};
+			const std::array traversal{
+				UnrealVoxelSim::Voxel::Solid::Api::MaterialTraversal{UnrealVoxelSim::Voxel::Solid::Api::MaterialId{1}},
+				UnrealVoxelSim::Voxel::Solid::Api::MaterialTraversal{
+					UnrealVoxelSim::Voxel::Solid::Api::MaterialId{2}, false, false, true}};
+			Ecs::EnTT::Registry registry{Ecs::Api::RegistryScopeId{1}};
+			const auto entity = registry.Create();
+			ASSERT_TRUE(registry.Assign<Spatial::Api::PositionComponent>(entity, Spawn()));
+			ASSERT_TRUE(registry.Assign<Spatial::Api::LinearVelocityComponent>(entity, Velocity{}));
+			ASSERT_TRUE(registry.Assign<Api::ProfileComponent>(entity, profiles[0].Id));
+			ASSERT_TRUE(registry.Assign<Api::GroundedComponent>(entity, true));
+			Controller::Access access{registry};
+			Controller controller{access, terrain, profiles, traversal};
+			ASSERT_TRUE(controller.SetIntent(entity, {}, {}));
+			ASSERT_TRUE(controller.SetIntent(
+				entity, Simulation::Api::TickIndex{1}, Api::Intent{{{}, {}, Scalar::FromWhole(2)}, false}));
+			controller.Step({Simulation::Api::TickIndex{1}, Simulation::Api::StandardStepDuration});
+
+			EXPECT_GT(registry.Get<Spatial::Api::PositionComponent>(entity)->get().Value.Z, Spawn().Z);
+			EXPECT_FALSE(registry.Get<Api::GroundedComponent>(entity)->get().Value);
 		}
 	} // namespace
 } // namespace UnrealVoxelSim::Movement::Voxel
